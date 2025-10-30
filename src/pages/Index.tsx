@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -6,15 +7,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import Icon from "@/components/ui/icon";
-import { authAPI, statsAPI, type User } from "@/lib/api";
+import { authAPI, statsAPI, campaignsAPI, type User, type Campaign } from "@/lib/api";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showAuthForm, setShowAuthForm] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<"user" | "advertiser">("user");
   const [stats, setStats] = useState({ total_users: 0, active_campaigns: 0, total_payouts: 0, avg_earnings: 0 });
+  const [availableCampaigns, setAvailableCampaigns] = useState<Campaign[]>([]);
+  const [campaignFormData, setCampaignFormData] = useState({ title: '', url: '', required_views: 1000 });
   const { toast } = useToast();
 
   useEffect(() => {
@@ -24,6 +28,7 @@ const Index = () => {
         if (response.success && response.user) {
           setUser(response.user);
           setIsLoggedIn(true);
+          loadAvailableCampaigns(sessionToken);
         } else {
           localStorage.removeItem('session_token');
         }
@@ -32,6 +37,55 @@ const Index = () => {
     
     statsAPI.getStats().then(setStats);
   }, []);
+
+  const loadAvailableCampaigns = async (sessionToken: string) => {
+    const response = await campaignsAPI.getAvailable(sessionToken);
+    if (response.campaigns) {
+      setAvailableCampaigns(response.campaigns);
+    }
+  };
+
+  const handleCreateCampaign = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const sessionToken = localStorage.getItem('session_token');
+    if (!sessionToken) return;
+
+    const cost = (campaignFormData.required_views / 1000) * 0.15;
+    
+    if (user && user.ad_balance < cost) {
+      toast({ title: "Недостаточно средств", description: "Пополните рекламный баланс", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const response = await campaignsAPI.create(
+        sessionToken,
+        campaignFormData.title,
+        campaignFormData.url,
+        campaignFormData.required_views
+      );
+
+      if (response.success) {
+        toast({ title: "Успешно!", description: response.message || "Кампания создана" });
+        setCampaignFormData({ title: '', url: '', required_views: 1000 });
+        
+        const updatedUser = await authAPI.verify(sessionToken);
+        if (updatedUser.user) setUser(updatedUser.user);
+      } else {
+        toast({ title: "Ошибка", description: response.error || "Не удалось создать кампанию", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Ошибка", description: "Проблема с подключением", variant: "destructive" });
+    }
+  };
+
+  const handleStartPTC = () => {
+    if (availableCampaigns.length === 0) {
+      toast({ title: "Нет кампаний", description: "Пока нет доступных рекламных кампаний" });
+      return;
+    }
+    navigate('/ptc-view');
+  };
 
   const handleAuth = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -302,7 +356,31 @@ const Index = () => {
                 <Icon name="MousePointerClick" className="text-primary" size={28} />
                 Смотри и зарабатывай
               </h2>
-              <p className="text-muted-foreground text-center py-12">Пока нет активных кампаний. Загляни позже!</p>
+              
+              {availableCampaigns.length > 0 ? (
+                <>
+                  <div className="mb-6 text-center">
+                    <p className="text-muted-foreground mb-4">Доступно {availableCampaigns.length} кампаний</p>
+                    <Button onClick={handleStartPTC} size="lg" className="bg-gradient-to-r from-primary to-secondary hover:opacity-90">
+                      <Icon name="Play" className="mr-2" size={20} />
+                      Начать зарабатывать
+                    </Button>
+                  </div>
+                  <div className="grid gap-4">
+                    {availableCampaigns.slice(0, 5).map((campaign) => (
+                      <div key={campaign.id} className="p-4 rounded-lg bg-muted/30 flex items-center justify-between">
+                        <div>
+                          <h3 className="font-heading font-semibold mb-1">{campaign.title}</h3>
+                          <p className="text-sm text-muted-foreground">Награда: ${campaign.reward.toFixed(4)}</p>
+                        </div>
+                        <Icon name="ChevronRight" className="text-muted-foreground" size={20} />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted-foreground text-center py-12">Пока нет активных кампаний. Загляни позже!</p>
+              )}
             </Card>
           </TabsContent>
 
@@ -333,30 +411,72 @@ const Index = () => {
                 Добавить ссылку PTC
               </h2>
 
-              <div className="space-y-4 max-w-2xl">
+              <form onSubmit={handleCreateCampaign} className="space-y-4 max-w-2xl">
                 <div>
-                  <Label htmlFor="url">URL рекламы</Label>
-                  <Input id="url" placeholder="https://example.com" className="mt-2" />
+                  <Label htmlFor="title">Название кампании</Label>
+                  <Input 
+                    id="title" 
+                    value={campaignFormData.title}
+                    onChange={(e) => setCampaignFormData({ ...campaignFormData, title: e.target.value })}
+                    placeholder="Название вашей кампании" 
+                    className="mt-2" 
+                    required 
+                  />
                 </div>
                 <div>
-                  <Label htmlFor="title">Название</Label>
-                  <Input id="title" placeholder="Название вашей кампании" className="mt-2" />
+                  <Label htmlFor="url">Ссылка на рекламируемый сайт</Label>
+                  <Input 
+                    id="url" 
+                    type="url"
+                    value={campaignFormData.url}
+                    onChange={(e) => setCampaignFormData({ ...campaignFormData, url: e.target.value })}
+                    placeholder="https://example.com" 
+                    className="mt-2" 
+                    required 
+                  />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="duration">Длительность (сек)</Label>
-                    <Input id="duration" type="number" placeholder="15" className="mt-2" />
+                <div>
+                  <Label htmlFor="required_views">Количество просмотров</Label>
+                  <Input 
+                    id="required_views" 
+                    type="number" 
+                    min="100"
+                    value={campaignFormData.required_views}
+                    onChange={(e) => setCampaignFormData({ ...campaignFormData, required_views: parseInt(e.target.value) || 1000 })}
+                    placeholder="1000" 
+                    className="mt-2" 
+                    required 
+                  />
+                </div>
+                
+                <div className="p-4 rounded-lg bg-muted/30 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span>Стоимость за 1000 просмотров:</span>
+                    <span className="font-bold">$0.15</span>
                   </div>
-                  <div>
-                    <Label htmlFor="reward">Награда ($)</Label>
-                    <Input id="reward" type="number" step="0.01" placeholder="0.05" className="mt-2" />
+                  <div className="flex justify-between text-sm">
+                    <span>Длительность таймера:</span>
+                    <span className="font-bold">5 секунд</span>
+                  </div>
+                  <div className="border-t border-border/50 pt-2 flex justify-between">
+                    <span className="font-heading font-bold">Итого:</span>
+                    <span className="font-heading font-bold text-lg text-primary">
+                      ${((campaignFormData.required_views / 1000) * 0.15).toFixed(2)}
+                    </span>
                   </div>
                 </div>
-                <Button className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90">
+
+                <div className="p-4 rounded-lg bg-accent/10 border border-accent/30">
+                  <p className="text-sm text-muted-foreground">
+                    ⚠️ После создания кампания отправляется на модерацию для проверки совместимости с iframe
+                  </p>
+                </div>
+
+                <Button type="submit" className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90">
                   <Icon name="Plus" className="mr-2" size={20} />
                   Создать кампанию
                 </Button>
-              </div>
+              </form>
             </Card>
 
             <Card className="p-8 bg-gradient-to-br from-card to-muted/30 border-border/50">

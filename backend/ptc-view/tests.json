@@ -1,0 +1,18 @@
+{
+  "tests": [
+    {
+      "name": "Complete view without auth",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "campaign_id": 1,
+        "captcha_correct": true
+      },
+      "expectedStatus": 401,
+      "expectedBody": {
+        "error": "Unauthorized"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
