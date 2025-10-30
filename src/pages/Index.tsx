@@ -1,57 +1,76 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
 import Icon from "@/components/ui/icon";
+import { authAPI, statsAPI, type User } from "@/lib/api";
 
 const Index = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showAuthForm, setShowAuthForm] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<"user" | "advertiser">("user");
-  const [balance, setBalance] = useState(12.45);
-  const [adBalance, setAdBalance] = useState(250.0);
-  const [timer, setTimer] = useState(15);
-  const [isWatching, setIsWatching] = useState(false);
+  const [stats, setStats] = useState({ total_users: 0, active_campaigns: 0, total_payouts: 0, avg_earnings: 0 });
+  const { toast } = useToast();
 
-  const stats = [
-    { label: "Активных пользователей", value: "12,547", icon: "Users" },
-    { label: "Выплачено", value: "$48,920", icon: "DollarSign" },
-    { label: "Активных кампаний", value: "324", icon: "TrendingUp" },
-    { label: "Средний заработок", value: "$3.89", icon: "Award" },
-  ];
-
-  const ptcAds = [
-    { id: 1, title: "Онлайн курс по программированию", reward: 0.05, duration: 15 },
-    { id: 2, title: "Новый крипто-кошелек", reward: 0.08, duration: 20 },
-    { id: 3, title: "Маркетплейс товаров", reward: 0.03, duration: 10 },
-    { id: 4, title: "Образовательная платформа", reward: 0.06, duration: 15 },
-  ];
-
-  const earningsData = [
-    { date: "26 Окт", amount: 2.45 },
-    { date: "27 Окт", amount: 3.12 },
-    { date: "28 Окт", amount: 1.89 },
-    { date: "29 Окт", amount: 4.56 },
-    { date: "30 Окт", amount: 0.43 },
-  ];
-
-  const handleStartWatch = () => {
-    setIsWatching(true);
-    const countdown = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(countdown);
-          setIsWatching(false);
-          setBalance((prevBalance) => prevBalance + 0.05);
-          setTimer(15);
-          return 15;
+  useEffect(() => {
+    const sessionToken = localStorage.getItem('session_token');
+    if (sessionToken) {
+      authAPI.verify(sessionToken).then((response) => {
+        if (response.success && response.user) {
+          setUser(response.user);
+          setIsLoggedIn(true);
+        } else {
+          localStorage.removeItem('session_token');
         }
-        return prev - 1;
       });
-    }, 1000);
+    }
+    
+    statsAPI.getStats().then(setStats);
+  }, []);
+
+  const handleAuth = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+    const username = formData.get('username') as string;
+
+    try {
+      const response = isRegistering
+        ? await authAPI.register(email, password, username)
+        : await authAPI.login(email, password);
+
+      if (response.success && response.session_token && response.user) {
+        localStorage.setItem('session_token', response.session_token);
+        setUser(response.user);
+        setIsLoggedIn(true);
+        setShowAuthForm(false);
+        toast({ title: "Успешно!", description: isRegistering ? "Регистрация завершена" : "Вы вошли в систему" });
+      } else {
+        toast({ title: "Ошибка", description: response.error || "Не удалось войти", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Ошибка", description: "Проблема с подключением", variant: "destructive" });
+    }
   };
+
+  const handleLogout = () => {
+    localStorage.removeItem('session_token');
+    setIsLoggedIn(false);
+    setUser(null);
+  };
+
+  const statsData = [
+    { label: "Активных пользователей", value: stats.total_users.toLocaleString(), icon: "Users" },
+    { label: "Выплачено", value: `$${stats.total_payouts.toFixed(2)}`, icon: "DollarSign" },
+    { label: "Активных кампаний", value: stats.active_campaigns.toString(), icon: "TrendingUp" },
+    { label: "Средний заработок", value: `$${stats.avg_earnings.toFixed(2)}`, icon: "Award" },
+  ];
 
   if (!isLoggedIn) {
     return (
@@ -66,11 +85,55 @@ const Index = () => {
                 ClickProfit
               </span>
             </div>
-            <Button onClick={() => setIsLoggedIn(true)} className="bg-gradient-to-r from-primary to-secondary hover:opacity-90">
+            <Button onClick={() => setShowAuthForm(true)} className="bg-gradient-to-r from-primary to-secondary hover:opacity-90">
               Войти
             </Button>
           </div>
         </nav>
+
+        {showAuthForm && (
+          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <Card className="w-full max-w-md p-8 bg-gradient-to-br from-card to-muted/30 border-border/50 animate-scale-in">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-3xl font-heading font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                  {isRegistering ? 'Регистрация' : 'Вход'}
+                </h2>
+                <Button variant="ghost" size="icon" onClick={() => setShowAuthForm(false)}>
+                  <Icon name="X" size={20} />
+                </Button>
+              </div>
+              
+              <form onSubmit={handleAuth} className="space-y-4">
+                {isRegistering && (
+                  <div>
+                    <Label htmlFor="username">Имя пользователя</Label>
+                    <Input id="username" name="username" required className="mt-2" />
+                  </div>
+                )}
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" name="email" type="email" required className="mt-2" />
+                </div>
+                <div>
+                  <Label htmlFor="password">Пароль</Label>
+                  <Input id="password" name="password" type="password" required className="mt-2" />
+                </div>
+                <Button type="submit" className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90">
+                  {isRegistering ? 'Зарегистрироваться' : 'Войти'}
+                </Button>
+              </form>
+
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => setIsRegistering(!isRegistering)}
+                  className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                >
+                  {isRegistering ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'}
+                </button>
+              </div>
+            </Card>
+          </div>
+        )}
 
         <section className="container mx-auto px-4 py-20 text-center">
           <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
@@ -83,7 +146,7 @@ const Index = () => {
             <div className="flex flex-wrap gap-4 justify-center">
               <Button
                 size="lg"
-                onClick={() => setIsLoggedIn(true)}
+                onClick={() => { setShowAuthForm(true); setIsRegistering(true); }}
                 className="bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-lg px-8 py-6 rounded-2xl"
               >
                 <Icon name="Rocket" className="mr-2" size={20} />
@@ -103,7 +166,7 @@ const Index = () => {
 
         <section className="container mx-auto px-4 py-16">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {stats.map((stat, index) => (
+            {statsData.map((stat, index) => (
               <Card
                 key={index}
                 className="p-6 bg-gradient-to-br from-card to-muted/50 border-border/50 backdrop-blur-sm animate-scale-in hover:scale-105 transition-transform"
@@ -175,17 +238,24 @@ const Index = () => {
             <div className="px-6 py-2 rounded-xl bg-gradient-to-r from-primary/20 to-secondary/20 border border-primary/30">
               <div className="flex items-center gap-2">
                 <Icon name="Wallet" className="text-primary" size={20} />
-                <span className="font-bold text-lg">${balance.toFixed(2)}</span>
+                <span className="font-bold text-lg">${user?.balance.toFixed(2)}</span>
               </div>
             </div>
-            <Button variant="ghost" size="icon">
-              <Icon name="User" size={20} />
+            <Button variant="ghost" size="icon" onClick={handleLogout}>
+              <Icon name="LogOut" size={20} />
             </Button>
           </div>
         </div>
       </nav>
 
       <div className="container mx-auto px-4 py-8">
+        <div className="mb-8 text-center">
+          <h2 className="text-4xl font-heading font-bold mb-2">
+            Добро пожаловать, <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">{user?.username}</span>!
+          </h2>
+          <p className="text-muted-foreground">Выбери роль для продолжения</p>
+        </div>
+
         <Tabs defaultValue={userRole} onValueChange={(v) => setUserRole(v as "user" | "advertiser")}>
           <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-8 bg-muted/50 p-1">
             <TabsTrigger value="user" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary">
@@ -206,16 +276,8 @@ const Index = () => {
                   <Icon name="Wallet" className="text-primary" size={20} />
                 </div>
                 <div className="text-4xl font-heading font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-                  ${balance.toFixed(2)}
+                  ${user?.balance.toFixed(2)}
                 </div>
-              </Card>
-
-              <Card className="p-6 bg-gradient-to-br from-card to-muted/30 border-border/50">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-sm text-muted-foreground">Сегодня</div>
-                  <Icon name="TrendingUp" className="text-secondary" size={20} />
-                </div>
-                <div className="text-4xl font-heading font-bold">$0.43</div>
               </Card>
 
               <Card className="p-6 bg-gradient-to-br from-card to-muted/30 border-border/50">
@@ -223,7 +285,15 @@ const Index = () => {
                   <div className="text-sm text-muted-foreground">Всего кликов</div>
                   <Icon name="MousePointerClick" className="text-accent" size={20} />
                 </div>
-                <div className="text-4xl font-heading font-bold">247</div>
+                <div className="text-4xl font-heading font-bold">{user?.total_clicks}</div>
+              </Card>
+
+              <Card className="p-6 bg-gradient-to-br from-card to-muted/30 border-border/50">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-sm text-muted-foreground">Сегодня</div>
+                  <Icon name="TrendingUp" className="text-secondary" size={20} />
+                </div>
+                <div className="text-4xl font-heading font-bold">$0.00</div>
               </Card>
             </div>
 
@@ -232,64 +302,7 @@ const Index = () => {
                 <Icon name="MousePointerClick" className="text-primary" size={28} />
                 Смотри и зарабатывай
               </h2>
-
-              <div className="grid gap-4">
-                {ptcAds.map((ad) => (
-                  <Card key={ad.id} className="p-6 bg-gradient-to-r from-muted/50 to-muted/30 border-border/50 hover:border-primary/50 transition-all">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <h3 className="text-xl font-heading font-semibold mb-2">{ad.title}</h3>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Icon name="Clock" size={16} />
-                            {ad.duration} сек
-                          </span>
-                          <span className="flex items-center gap-1 text-primary font-semibold">
-                            <Icon name="DollarSign" size={16} />
-                            {ad.reward.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                      <Button
-                        onClick={handleStartWatch}
-                        disabled={isWatching}
-                        className="bg-gradient-to-r from-primary to-secondary hover:opacity-90"
-                      >
-                        {isWatching ? `${timer}s` : "Смотреть"}
-                      </Button>
-                    </div>
-                    {isWatching && (
-                      <div className="mt-4">
-                        <Progress value={(1 - timer / 15) * 100} className="h-2" />
-                      </div>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            </Card>
-
-            <Card className="p-8 bg-gradient-to-br from-card to-muted/30 border-border/50">
-              <h2 className="text-3xl font-heading font-bold mb-6 flex items-center gap-3">
-                <Icon name="BarChart3" className="text-primary" size={28} />
-                Статистика заработка
-              </h2>
-
-              <div className="space-y-4">
-                {earningsData.map((day, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 rounded-lg bg-muted/30">
-                    <span className="font-medium">{day.date}</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-32 bg-muted rounded-full h-2">
-                        <div
-                          className="bg-gradient-to-r from-primary to-secondary h-2 rounded-full"
-                          style={{ width: `${(day.amount / 5) * 100}%` }}
-                        />
-                      </div>
-                      <span className="font-bold w-16 text-right">${day.amount.toFixed(2)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <p className="text-muted-foreground text-center py-12">Пока нет активных кампаний. Загляни позже!</p>
             </Card>
           </TabsContent>
 
@@ -301,7 +314,7 @@ const Index = () => {
                   <Icon name="Wallet" className="text-primary" size={20} />
                 </div>
                 <div className="text-4xl font-heading font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-                  ${adBalance.toFixed(2)}
+                  ${user?.ad_balance.toFixed(2)}
                 </div>
               </Card>
 
@@ -310,7 +323,7 @@ const Index = () => {
                   <div className="text-sm text-muted-foreground">Активных кампаний</div>
                   <Icon name="TrendingUp" className="text-secondary" size={20} />
                 </div>
-                <div className="text-4xl font-heading font-bold">3</div>
+                <div className="text-4xl font-heading font-bold">0</div>
               </Card>
             </div>
 
