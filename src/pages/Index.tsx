@@ -104,6 +104,7 @@ const Index = () => {
         setUser(response.user);
         setIsLoggedIn(true);
         setShowAuthForm(false);
+        loadAvailableCampaigns(response.session_token);
         toast({ title: "Успешно!", description: isRegistering ? "Регистрация завершена" : "Вы вошли в систему" });
       } else {
         toast({ title: "Ошибка", description: response.error || "Не удалось войти", variant: "destructive" });

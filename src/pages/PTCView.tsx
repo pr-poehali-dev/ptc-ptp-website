@@ -211,6 +211,7 @@ const PTCView = () => {
       ) : (
         <div className="flex-1 relative">
           <iframe
+            key={currentCampaign.id}
             ref={iframeRef}
             src={currentCampaign.url}
             className="w-full h-full border-0"
