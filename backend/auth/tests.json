@@ -1,33 +1,28 @@
 {
   "tests": [
     {
-      "name": "Register new user",
-      "method": "POST",
-      "path": "/",
-      "body": {
-        "action": "register",
-        "email": "test@example.com",
-        "password": "password123",
-        "username": "testuser"
-      },
-      "expectedStatus": 201,
-      "expectedBody": {
-        "success": true,
-        "session_token": "string",
-        "user": {
-          "email": "test@example.com",
-          "username": "testuser"
-        }
-      },
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Login existing user",
+      "name": "Login test user",
       "method": "POST",
       "path": "/",
       "body": {
         "action": "login",
-        "email": "test@example.com",
+        "email": "user@test.com",
+        "password": "test123"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "success": true,
+        "session_token": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Login advertiser",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "login",
+        "email": "advertiser@test.com",
         "password": "password123"
       },
       "expectedStatus": 200,

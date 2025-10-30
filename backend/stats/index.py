@@ -4,6 +4,10 @@ from typing import Dict, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+def escape_sql_string(value: str) -> str:
+    """Escape single quotes in SQL strings by doubling them"""
+    return value.replace("'", "''")
+
 def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)

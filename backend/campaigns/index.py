@@ -5,18 +5,22 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from decimal import Decimal
 
+def escape_sql_string(value: str) -> str:
+    """Escape single quotes in SQL strings by doubling them"""
+    return value.replace("'", "''")
+
 def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
 def get_user_from_session(session_token: str, cur):
+    escaped_token = escape_sql_string(session_token)
     cur.execute(
-        """
+        f"""
         SELECT u.id FROM sessions s
         JOIN users u ON s.user_id = u.id
-        WHERE s.session_token = %s AND s.expires_at > NOW()
-        """,
-        (session_token,)
+        WHERE s.session_token = '{escaped_token}' AND s.expires_at > NOW()
+        """
     )
     user = cur.fetchone()
     return user['id'] if user else None
@@ -85,7 +89,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             total_cost = (Decimal(required_views) / 1000) * cost_per_1000
             reward_per_view = cost_per_1000 / 1000
             
-            cur.execute("SELECT ad_balance FROM users WHERE id = %s", (user_id,))
+            cur.execute(f"SELECT ad_balance FROM users WHERE id = {user_id}")
             user = cur.fetchone()
             
             if Decimal(user['ad_balance']) < total_cost:
@@ -96,25 +100,25 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'isBase64Encoded': False
                 }
             
+            escaped_title = escape_sql_string(title)
+            escaped_url = escape_sql_string(url)
             cur.execute(
-                """
+                f"""
                 INSERT INTO campaigns 
                 (advertiser_id, title, url, reward, duration, budget, required_views, moderation_status, is_active)
-                VALUES (%s, %s, %s, %s, 5, %s, %s, 'pending', false)
+                VALUES ({user_id}, '{escaped_title}', '{escaped_url}', {float(reward_per_view)}, 5, {float(total_cost)}, {required_views}, 'pending', false)
                 RETURNING id
-                """,
-                (user_id, title, url, float(reward_per_view), float(total_cost), required_views)
+                """
             )
             campaign_id = cur.fetchone()['id']
             
             cur.execute(
-                "UPDATE users SET ad_balance = ad_balance - %s WHERE id = %s",
-                (float(total_cost), user_id)
+                f"UPDATE users SET ad_balance = ad_balance - {float(total_cost)} WHERE id = {user_id}"
             )
             
+            escaped_description = escape_sql_string(f'Created campaign: {title}')
             cur.execute(
-                "INSERT INTO transactions (user_id, type, amount, description) VALUES (%s, 'campaign_create', %s, %s)",
-                (user_id, float(total_cost), f'Created campaign: {title}')
+                f"INSERT INTO transactions (user_id, type, amount, description) VALUES ({user_id}, 'campaign_create', {float(total_cost)}, '{escaped_description}')"
             )
             
             conn.commit()
@@ -157,7 +161,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     }
                 
                 cur.execute(
-                    """
+                    f"""
                     SELECT c.id, c.title, c.url, c.reward, c.duration
                     FROM campaigns c
                     WHERE c.is_active = true 
@@ -165,12 +169,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     AND c.total_views < c.required_views
                     AND c.id NOT IN (
                         SELECT campaign_id FROM ad_views 
-                        WHERE user_id = %s AND DATE(created_at) = CURRENT_DATE
+                        WHERE user_id = {user_id} AND DATE(created_at) = CURRENT_DATE
                     )
                     ORDER BY c.created_at DESC
                     LIMIT 50
-                    """,
-                    (user_id,)
+                    """
                 )
                 campaigns = cur.fetchall()
                 
@@ -201,7 +204,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     WHERE moderation_status = 'approved' AND is_active = true
                     ORDER BY created_at DESC
                     LIMIT 20
-                    """,
+                    """
                 )
                 campaigns = cur.fetchall()
                 

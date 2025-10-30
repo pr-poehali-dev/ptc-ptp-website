@@ -17,6 +17,9 @@ def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
+def escape_sql_string(value: str) -> str:
+    return value.replace("'", "''") 
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
     Business: User authentication (registration and login)
@@ -74,7 +77,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'isBase64Encoded': False
                 }
             
-            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+            email_escaped = escape_sql_string(email)
+            cur.execute(f"SELECT id FROM users WHERE email = '{email_escaped}'")
             if cur.fetchone():
                 return {
                     'statusCode': 400,
@@ -84,18 +88,17 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 }
             
             password_hash = hash_password(password)
+            username_escaped = escape_sql_string(username)
             cur.execute(
-                "INSERT INTO users (email, password_hash, username) VALUES (%s, %s, %s) RETURNING id",
-                (email, password_hash, username)
+                f"INSERT INTO users (email, password_hash, username) VALUES ('{email_escaped}', '{password_hash}', '{username_escaped}') RETURNING id"
             )
             user_id = cur.fetchone()['id']
             conn.commit()
             
             session_token = generate_session_token()
-            expires_at = datetime.now() + timedelta(days=30)
+            expires_at = (datetime.now() + timedelta(days=30)).isoformat()
             cur.execute(
-                "INSERT INTO sessions (user_id, session_token, expires_at) VALUES (%s, %s, %s)",
-                (user_id, session_token, expires_at)
+                f"INSERT INTO sessions (user_id, session_token, expires_at) VALUES ({user_id}, '{session_token}', '{expires_at}')"
             )
             conn.commit()
             
@@ -116,9 +119,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         elif action == 'login':
             password_hash = hash_password(password)
+            email_escaped = escape_sql_string(email)
             cur.execute(
-                "SELECT id, email, username, balance, ad_balance, total_clicks FROM users WHERE email = %s AND password_hash = %s",
-                (email, password_hash)
+                f"SELECT id, email, username, balance, ad_balance, total_clicks FROM users WHERE email = '{email_escaped}' AND password_hash = '{password_hash}'"
             )
             user = cur.fetchone()
             
@@ -131,10 +134,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 }
             
             session_token = generate_session_token()
-            expires_at = datetime.now() + timedelta(days=30)
+            expires_at = (datetime.now() + timedelta(days=30)).isoformat()
             cur.execute(
-                "INSERT INTO sessions (user_id, session_token, expires_at) VALUES (%s, %s, %s)",
-                (user['id'], session_token, expires_at)
+                f"INSERT INTO sessions (user_id, session_token, expires_at) VALUES ({user['id']}, '{session_token}', '{expires_at}')"
             )
             conn.commit()
             
@@ -166,14 +168,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'isBase64Encoded': False
                 }
             
+            session_token_escaped = escape_sql_string(session_token)
             cur.execute(
-                """
+                f"""
                 SELECT u.id, u.email, u.username, u.balance, u.ad_balance, u.total_clicks
                 FROM sessions s
                 JOIN users u ON s.user_id = u.id
-                WHERE s.session_token = %s AND s.expires_at > NOW()
-                """,
-                (session_token,)
+                WHERE s.session_token = '{session_token_escaped}' AND s.expires_at > NOW()
+                """
             )
             user = cur.fetchone()
             

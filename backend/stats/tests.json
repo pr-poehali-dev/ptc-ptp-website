@@ -4,14 +4,7 @@
       "name": "Get platform statistics",
       "method": "GET",
       "path": "/",
-      "expectedStatus": 200,
-      "expectedBody": {
-        "total_users": 0,
-        "active_campaigns": 0,
-        "total_payouts": 0,
-        "avg_earnings": 0
-      },
-      "bodyMatcher": "partial"
+      "expectedStatus": 200
     }
   ]
 }

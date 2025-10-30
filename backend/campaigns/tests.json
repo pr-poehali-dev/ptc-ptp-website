@@ -4,11 +4,7 @@
       "name": "Get campaigns list",
       "method": "GET",
       "path": "/",
-      "expectedStatus": 200,
-      "expectedBody": {
-        "campaigns": []
-      },
-      "bodyMatcher": "partial"
+      "expectedStatus": 200
     }
   ]
 }

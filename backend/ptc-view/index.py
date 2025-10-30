@@ -4,18 +4,22 @@ from typing import Dict, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+def escape_sql_string(value: str) -> str:
+    """Escape single quotes in SQL strings by doubling them"""
+    return value.replace("'", "''")
+
 def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
 def get_user_from_session(session_token: str, cur):
+    escaped_token = escape_sql_string(session_token)
     cur.execute(
-        """
+        f"""
         SELECT u.id FROM sessions s
         JOIN users u ON s.user_id = u.id
-        WHERE s.session_token = %s AND s.expires_at > NOW()
-        """,
-        (session_token,)
+        WHERE s.session_token = '{escaped_token}' AND s.expires_at > NOW()
+        """
     )
     user = cur.fetchone()
     return user['id'] if user else None
@@ -87,8 +91,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         cur.execute(
-            "SELECT id, reward, total_views, required_views FROM campaigns WHERE id = %s AND is_active = true AND moderation_status = 'approved'",
-            (campaign_id,)
+            f"SELECT id, reward, total_views, required_views FROM campaigns WHERE id = {campaign_id} AND is_active = true AND moderation_status = 'approved'"
         )
         campaign = cur.fetchone()
         
@@ -109,8 +112,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         cur.execute(
-            "SELECT id FROM ad_views WHERE user_id = %s AND campaign_id = %s AND DATE(created_at) = CURRENT_DATE",
-            (user_id, campaign_id)
+            f"SELECT id FROM ad_views WHERE user_id = {user_id} AND campaign_id = {campaign_id} AND DATE(created_at) = CURRENT_DATE"
         )
         if cur.fetchone():
             return {
@@ -123,24 +125,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         reward = float(campaign['reward'])
         
         cur.execute(
-            "INSERT INTO ad_views (user_id, campaign_id, reward, completed, completed_at) VALUES (%s, %s, %s, true, NOW())",
-            (user_id, campaign_id, reward)
+            f"INSERT INTO ad_views (user_id, campaign_id, reward, completed, completed_at) VALUES ({user_id}, {campaign_id}, {reward}, true, NOW())"
         )
         
         cur.execute(
-            "UPDATE users SET balance = balance + %s, total_clicks = total_clicks + 1 WHERE id = %s RETURNING balance",
-            (reward, user_id)
+            f"UPDATE users SET balance = balance + {reward}, total_clicks = total_clicks + 1 WHERE id = {user_id} RETURNING balance"
         )
         new_balance = cur.fetchone()['balance']
         
         cur.execute(
-            "UPDATE campaigns SET total_views = total_views + 1, spent = spent + %s WHERE id = %s",
-            (reward, campaign_id)
+            f"UPDATE campaigns SET total_views = total_views + 1, spent = spent + {reward} WHERE id = {campaign_id}"
         )
         
+        escaped_description = escape_sql_string(f'Viewed campaign #{campaign_id}')
         cur.execute(
-            "INSERT INTO transactions (user_id, type, amount, description) VALUES (%s, 'ad_view', %s, %s)",
-            (user_id, reward, f'Viewed campaign #{campaign_id}')
+            f"INSERT INTO transactions (user_id, type, amount, description) VALUES ({user_id}, 'ad_view', {reward}, '{escaped_description}')"
         )
         
         conn.commit()
