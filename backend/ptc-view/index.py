@@ -5,7 +5,6 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 def escape_sql_string(value: str) -> str:
-    """Escape single quotes in SQL strings by doubling them"""
     return value.replace("'", "''")
 
 def get_db_connection():
@@ -16,17 +15,16 @@ def get_user_from_session(session_token: str, cur):
     escaped_token = escape_sql_string(session_token)
     cur.execute(
         f"""
-        SELECT u.id FROM sessions s
+        SELECT u.id, u.referred_by FROM sessions s
         JOIN users u ON s.user_id = u.id
         WHERE s.session_token = '{escaped_token}' AND s.expires_at > NOW()
         """
     )
-    user = cur.fetchone()
-    return user['id'] if user else None
+    return cur.fetchone()
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
-    Business: Complete PTC view and earn reward
+    Business: Complete PTC view and earn credits (0.7 per view, 0.1 to referrer)
     Args: event - dict with httpMethod, body, headers
           context - object with attributes: request_id, function_name
     Returns: HTTP response with success status and new balance
@@ -69,14 +67,17 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     cur = conn.cursor()
     
     try:
-        user_id = get_user_from_session(session_token, cur)
-        if not user_id:
+        user_data = get_user_from_session(session_token, cur)
+        if not user_data:
             return {
                 'statusCode': 401,
                 'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'error': 'Invalid session'}),
                 'isBase64Encoded': False
             }
+        
+        user_id = user_data['id']
+        referrer_id = user_data['referred_by']
         
         body_data = json.loads(event.get('body', '{}'))
         campaign_id = body_data.get('campaign_id')
@@ -91,7 +92,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         cur.execute(
-            f"SELECT id, reward, total_views, required_views FROM campaigns WHERE id = {campaign_id} AND is_active = true AND moderation_status = 'approved'"
+            f"SELECT id, cost_per_view, total_views, required_views FROM campaigns WHERE id = {campaign_id} AND is_active = true AND moderation_status = 'approved'"
         )
         campaign = cur.fetchone()
         
@@ -122,24 +123,36 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'isBase64Encoded': False
             }
         
-        reward = float(campaign['reward'])
+        user_reward = 0.7
+        referrer_reward = 0.1
+        cost_per_view = float(campaign['cost_per_view'])
         
         cur.execute(
-            f"INSERT INTO ad_views (user_id, campaign_id, reward, completed, completed_at) VALUES ({user_id}, {campaign_id}, {reward}, true, NOW())"
+            f"INSERT INTO ad_views (user_id, campaign_id, reward, completed, completed_at) VALUES ({user_id}, {campaign_id}, {user_reward}, true, NOW()) RETURNING id"
         )
+        ad_view_id = cur.fetchone()['id']
         
         cur.execute(
-            f"UPDATE users SET balance = balance + {reward}, total_clicks = total_clicks + 1 WHERE id = {user_id} RETURNING balance"
+            f"UPDATE users SET credits = credits + {user_reward}, total_clicks = total_clicks + 1 WHERE id = {user_id} RETURNING credits"
         )
-        new_balance = cur.fetchone()['balance']
+        new_balance = cur.fetchone()['credits']
+        
+        if referrer_id:
+            cur.execute(
+                f"UPDATE users SET credits = credits + {referrer_reward}, total_referral_earnings = total_referral_earnings + {referrer_reward} WHERE id = {referrer_id}"
+            )
+            
+            cur.execute(
+                f"INSERT INTO referral_earnings (referrer_id, referred_user_id, ad_view_id, credits) VALUES ({referrer_id}, {user_id}, {ad_view_id}, {referrer_reward})"
+            )
         
         cur.execute(
-            f"UPDATE campaigns SET total_views = total_views + 1, spent = spent + {reward} WHERE id = {campaign_id}"
+            f"UPDATE campaigns SET total_views = total_views + 1, spent = spent + {cost_per_view} WHERE id = {campaign_id}"
         )
         
         escaped_description = escape_sql_string(f'Viewed campaign #{campaign_id}')
         cur.execute(
-            f"INSERT INTO transactions (user_id, type, amount, description) VALUES ({user_id}, 'ad_view', {reward}, '{escaped_description}')"
+            f"INSERT INTO transactions (user_id, type, amount, description) VALUES ({user_id}, 'ad_view', {user_reward}, '{escaped_description}')"
         )
         
         conn.commit()
@@ -149,7 +162,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
             'body': json.dumps({
                 'success': True,
-                'reward': reward,
+                'reward': user_reward,
                 'new_balance': float(new_balance)
             }),
             'isBase64Encoded': False

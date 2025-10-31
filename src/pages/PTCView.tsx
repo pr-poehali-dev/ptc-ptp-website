@@ -51,11 +51,25 @@ const PTCView = () => {
   }, [navigate, toast]);
 
   useEffect(() => {
-    if (currentCampaign && timer > 0) {
+    if (currentCampaign && timer > 0 && !showCaptcha) {
+      let isPageVisible = !document.hidden;
+      
+      const handleVisibilityChange = () => {
+        isPageVisible = !document.hidden;
+      };
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
       const interval = setInterval(() => {
-        setTimer((prev) => prev - 1);
+        if (isPageVisible) {
+          setTimer((prev) => prev - 1);
+        }
       }, 1000);
-      return () => clearInterval(interval);
+      
+      return () => {
+        clearInterval(interval);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
     } else if (timer === 0 && !showCaptcha) {
       generateCaptcha();
       setShowCaptcha(true);

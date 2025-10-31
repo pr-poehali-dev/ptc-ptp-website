@@ -13,6 +13,9 @@ def hash_password(password: str) -> str:
 def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
+def generate_referral_code() -> str:
+    return secrets.token_urlsafe(8)[:10]
+
 def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
@@ -22,8 +25,8 @@ def escape_sql_string(value: str) -> str:
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
-    Business: User authentication (registration and login)
-    Args: event - dict with httpMethod, body
+    Business: User authentication with credits system and referral support
+    Args: event - dict with httpMethod, body, queryStringParameters
           context - object with attributes: request_id, function_name
     Returns: HTTP response with session token or error
     '''
@@ -55,6 +58,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     email = body_data.get('email', '').strip().lower()
     password = body_data.get('password', '')
     username = body_data.get('username', '').strip()
+    referral_code = body_data.get('referral_code', '').strip()
     
     if not email or not password:
         return {
@@ -87,11 +91,31 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'isBase64Encoded': False
                 }
             
+            referrer_id = None
+            if referral_code:
+                referral_code_escaped = escape_sql_string(referral_code)
+                cur.execute(f"SELECT id FROM users WHERE referral_code = '{referral_code_escaped}'")
+                referrer = cur.fetchone()
+                if referrer:
+                    referrer_id = referrer['id']
+            
             password_hash = hash_password(password)
             username_escaped = escape_sql_string(username)
-            cur.execute(
-                f"INSERT INTO users (email, password_hash, username) VALUES ('{email_escaped}', '{password_hash}', '{username_escaped}') RETURNING id"
-            )
+            user_referral_code = generate_referral_code()
+            
+            if referrer_id:
+                cur.execute(
+                    f"""INSERT INTO users (email, password_hash, username, referral_code, referred_by, credits) 
+                        VALUES ('{email_escaped}', '{password_hash}', '{username_escaped}', '{user_referral_code}', {referrer_id}, 0.00) 
+                        RETURNING id"""
+                )
+            else:
+                cur.execute(
+                    f"""INSERT INTO users (email, password_hash, username, referral_code, credits) 
+                        VALUES ('{email_escaped}', '{password_hash}', '{username_escaped}', '{user_referral_code}', 0.00) 
+                        RETURNING id"""
+                )
+            
             user_id = cur.fetchone()['id']
             conn.commit()
             
@@ -111,7 +135,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     'user': {
                         'id': user_id,
                         'email': email,
-                        'username': username
+                        'username': username,
+                        'referral_code': user_referral_code
                     }
                 }),
                 'isBase64Encoded': False
@@ -121,7 +146,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             password_hash = hash_password(password)
             email_escaped = escape_sql_string(email)
             cur.execute(
-                f"SELECT id, email, username, balance, ad_balance, total_clicks FROM users WHERE email = '{email_escaped}' AND password_hash = '{password_hash}'"
+                f"""SELECT id, email, username, credits, ad_balance, total_clicks, total_payouts, 
+                           referral_code, total_referral_earnings 
+                    FROM users 
+                    WHERE email = '{email_escaped}' AND password_hash = '{password_hash}'"""
             )
             user = cur.fetchone()
             
@@ -150,9 +178,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                         'id': user['id'],
                         'email': user['email'],
                         'username': user['username'],
-                        'balance': float(user['balance']),
+                        'credits': float(user['credits']),
                         'ad_balance': float(user['ad_balance']),
-                        'total_clicks': user['total_clicks']
+                        'total_clicks': user['total_clicks'],
+                        'total_payouts': float(user['total_payouts']),
+                        'referral_code': user['referral_code'],
+                        'total_referral_earnings': float(user['total_referral_earnings'])
                     }
                 }),
                 'isBase64Encoded': False
@@ -171,7 +202,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             session_token_escaped = escape_sql_string(session_token)
             cur.execute(
                 f"""
-                SELECT u.id, u.email, u.username, u.balance, u.ad_balance, u.total_clicks
+                SELECT u.id, u.email, u.username, u.credits, u.ad_balance, u.total_clicks, u.total_payouts,
+                       u.referral_code, u.total_referral_earnings
                 FROM sessions s
                 JOIN users u ON s.user_id = u.id
                 WHERE s.session_token = '{session_token_escaped}' AND s.expires_at > NOW()
@@ -196,9 +228,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                         'id': user['id'],
                         'email': user['email'],
                         'username': user['username'],
-                        'balance': float(user['balance']),
+                        'credits': float(user['credits']),
                         'ad_balance': float(user['ad_balance']),
-                        'total_clicks': user['total_clicks']
+                        'total_clicks': user['total_clicks'],
+                        'total_payouts': float(user['total_payouts']),
+                        'referral_code': user['referral_code'],
+                        'total_referral_earnings': float(user['total_referral_earnings'])
                     }
                 }),
                 'isBase64Encoded': False

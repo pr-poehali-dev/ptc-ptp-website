@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN total_payouts DECIMAL(15, 2) DEFAULT 0.00;

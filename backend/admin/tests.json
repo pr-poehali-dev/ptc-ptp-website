@@ -1,0 +1,10 @@
+{
+  "tests": [
+    {
+      "name": "Get admin settings",
+      "method": "GET",
+      "path": "/?action=settings",
+      "expectedStatus": 200
+    }
+  ]
+}

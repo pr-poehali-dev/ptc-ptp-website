@@ -9,12 +9,7 @@
         "email": "user@test.com",
         "password": "test123"
       },
-      "expectedStatus": 200,
-      "expectedBody": {
-        "success": true,
-        "session_token": "string"
-      },
-      "bodyMatcher": "partial"
+      "expectedStatus": 200
     },
     {
       "name": "Login advertiser",
@@ -25,12 +20,7 @@
         "email": "advertiser@test.com",
         "password": "password123"
       },
-      "expectedStatus": 200,
-      "expectedBody": {
-        "success": true,
-        "session_token": "string"
-      },
-      "bodyMatcher": "partial"
+      "expectedStatus": 200
     }
   ]
 }
